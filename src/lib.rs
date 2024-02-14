@@ -11,6 +11,7 @@ use crate::bot::Bot;
 mod bot;
 mod monitor;
 mod notify;
+mod tls_dns;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -72,6 +73,7 @@ pub fn init_log(debug: bool) {
 
     let targets = Targets::new()
         .with_target("h2", LevelFilter::OFF)
+        .with_target("hickory", LevelFilter::OFF)
         .with_default(LevelFilter::DEBUG);
 
     let layered = Registry::default().with(targets).with(layer).with(level);

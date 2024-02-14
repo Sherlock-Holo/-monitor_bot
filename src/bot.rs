@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use byte_unit::{Byte, UnitType};
+use reqwest::Client;
 use teloxide::dispatching::dialogue::GetChatId;
 use teloxide::macros::BotCommands;
 use teloxide::prelude::*;
@@ -8,6 +11,7 @@ use tracing::{debug, error, instrument};
 
 use crate::monitor::mem::MemoryInfo;
 use crate::notify::Notify;
+use crate::tls_dns::TlsDns;
 
 const MEMORY_CALLBACK_DATA: &str = "memory";
 
@@ -19,7 +23,14 @@ pub struct Bot {
 
 impl Bot {
     pub fn new(token: String, group_chat_id: i64) -> Self {
-        let bot = teloxide::Bot::new(token);
+        let http_client = Client::builder()
+            .dns_resolver(Arc::new(TlsDns::new()))
+            .https_only(true)
+            .http2_adaptive_window(true)
+            .build()
+            .unwrap();
+
+        let bot = teloxide::Bot::with_client(token, http_client);
 
         Self {
             bot,
