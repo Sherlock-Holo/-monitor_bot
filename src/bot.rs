@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use byte_unit::{Byte, UnitType};
@@ -14,11 +15,17 @@ use crate::notify::Notify;
 use crate::tls_dns::TlsDns;
 
 const MEMORY_CALLBACK_DATA: &str = "memory";
+const DISABLE_NOTIFY_CALLBACK_DATA: &str = "disable memory notify";
+const ENABLE_NOTIFY_CALLBACK_DATA: &str = "enable memory notify";
+
+const MONITOR_MENU: &str = "<strong>choose type</strong>";
+const SETTING_MENU: &str = "<strong>setting</strong>";
 
 #[derive(Debug, Clone)]
 pub struct Bot {
     bot: teloxide::Bot,
     group_chat_id: ChatId,
+    enable_notify: Arc<AtomicBool>,
 }
 
 impl Bot {
@@ -35,14 +42,29 @@ impl Bot {
         Self {
             bot,
             group_chat_id: ChatId(group_chat_id),
+            enable_notify: Arc::new(AtomicBool::new(true)),
         }
     }
 
-    fn create_inline_buttons() -> InlineKeyboardMarkup {
+    fn create_monitor_inline_buttons() -> InlineKeyboardMarkup {
         InlineKeyboardMarkup::default().append_row([InlineKeyboardButton::callback(
             "memory usage",
             MEMORY_CALLBACK_DATA,
         )])
+    }
+
+    fn create_setting_inline_buttons(&self) -> InlineKeyboardMarkup {
+        if self.enable_notify.load(Ordering::Acquire) {
+            InlineKeyboardMarkup::default().append_row([InlineKeyboardButton::callback(
+                DISABLE_NOTIFY_CALLBACK_DATA,
+                DISABLE_NOTIFY_CALLBACK_DATA,
+            )])
+        } else {
+            InlineKeyboardMarkup::default().append_row([InlineKeyboardButton::callback(
+                ENABLE_NOTIFY_CALLBACK_DATA,
+                ENABLE_NOTIFY_CALLBACK_DATA,
+            )])
+        }
     }
 
     pub async fn run_active<M: MemoryInfo + Sync + Clone + 'static>(
@@ -91,13 +113,24 @@ impl Bot {
                 match command {
                     Command::Show => {
                         self.bot
-                            .send_message(msg.chat.id, "<strong>choose type</strong>")
+                            .send_message(msg.chat.id, MONITOR_MENU)
                             .parse_mode(ParseMode::Html)
                             .reply_to_message_id(msg.id)
-                            .reply_markup(Self::create_inline_buttons())
+                            .reply_markup(Self::create_monitor_inline_buttons())
                             .await?;
 
-                        debug!("send button done");
+                        debug!("send monitor button done");
+                    }
+
+                    Command::Setting => {
+                        self.bot
+                            .send_message(msg.chat.id, SETTING_MENU)
+                            .parse_mode(ParseMode::Html)
+                            .reply_to_message_id(msg.id)
+                            .reply_markup(self.create_setting_inline_buttons())
+                            .await?;
+
+                        debug!("send setting button done");
                     }
                 }
             }
@@ -128,10 +161,54 @@ impl Bot {
                         let available = memory_info.get_memory_available().await?;
                         let message = Self::get_memory_info_message(total, total - available);
 
-                        self.bot
-                            .send_message(chat_id, message)
-                            .parse_mode(ParseMode::Html)
-                            .await?;
+                        match callback_query.message {
+                            None => {
+                                self.bot
+                                    .send_message(chat_id, message)
+                                    .parse_mode(ParseMode::Html)
+                                    .await?;
+                            }
+
+                            Some(msg) => {
+                                self.bot
+                                    .edit_message_text(chat_id, msg.id, message)
+                                    .parse_mode(ParseMode::Html)
+                                    .reply_markup(Self::create_monitor_inline_buttons())
+                                    .await?;
+                            }
+                        }
+
+                        debug!("handle memory callback done");
+                    }
+
+                    DISABLE_NOTIFY_CALLBACK_DATA => {
+                        self.bot.answer_callback_query(callback_query.id).await?;
+                        self.enable_notify.store(false, Ordering::Release);
+
+                        if let Some(msg) = callback_query.message {
+                            self.bot
+                                .edit_message_text(chat_id, msg.id, SETTING_MENU)
+                                .parse_mode(ParseMode::Html)
+                                .reply_markup(self.create_setting_inline_buttons())
+                                .await?;
+
+                            debug!("handle disable notify callback done");
+                        }
+                    }
+
+                    ENABLE_NOTIFY_CALLBACK_DATA => {
+                        self.bot.answer_callback_query(callback_query.id).await?;
+                        self.enable_notify.store(true, Ordering::Release);
+
+                        if let Some(msg) = callback_query.message {
+                            self.bot
+                                .edit_message_text(chat_id, msg.id, SETTING_MENU)
+                                .parse_mode(ParseMode::Html)
+                                .reply_markup(self.create_setting_inline_buttons())
+                                .await?;
+
+                            debug!("handle enable notify callback done");
+                        }
                     }
 
                     _ => {
@@ -193,4 +270,5 @@ impl Notify for Bot {
 #[command(rename_rule = "lowercase")]
 enum Command {
     Show,
+    Setting,
 }

@@ -72,8 +72,11 @@ pub fn init_log(debug: bool) {
     };
 
     let targets = Targets::new()
-        .with_target("h2", LevelFilter::OFF)
-        .with_target("hickory", LevelFilter::OFF)
+        .with_targets([
+            ("hyper", LevelFilter::OFF),
+            ("h2", LevelFilter::OFF),
+            ("hickory", LevelFilter::OFF),
+        ])
         .with_default(LevelFilter::DEBUG);
 
     let layered = Registry::default().with(targets).with(layer).with(level);
