@@ -3,9 +3,10 @@ use std::{io, time::Duration};
 use clap::Parser;
 use monitor::mem::ProcfsMemoryWatch;
 use tracing::{level_filters::LevelFilter, subscriber};
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::{fmt, layer::SubscriberExt, Registry};
 
-use crate::{bot::Bot, notify::Notify};
+use crate::bot::Bot;
 
 mod bot;
 mod monitor;
@@ -35,17 +36,21 @@ pub async fn run() -> anyhow::Result<()> {
 
     let bot = Bot::new(args.bot_token, args.group_chat_id);
 
-    run_monitor(bot, args.mem_watch_interval, args.mem_max_used_ratio).await
-}
+    let (mem_watch, memory_info) = ProcfsMemoryWatch::new(
+        bot.clone(),
+        args.mem_watch_interval,
+        args.mem_max_used_ratio,
+    );
 
-async fn run_monitor<N: Notify>(
-    notify: N,
-    interval: Duration,
-    max_mem_used_ratio: f64,
-) -> anyhow::Result<()> {
-    let mem_watch = ProcfsMemoryWatch::new(notify, interval, max_mem_used_ratio);
+    let watch_task = tokio::spawn(async move { mem_watch.run().await });
 
-    mem_watch.run().await
+    let active_bot_task = tokio::spawn(async move { bot.run_active(memory_info).await });
+
+    let (res1, res2) = futures_util::try_join!(watch_task, active_bot_task)?;
+    res1?;
+    res2?;
+
+    Err(anyhow::anyhow!("monitor bot stop unexpectedly"))
 }
 
 pub fn init_log(debug: bool) {
@@ -60,7 +65,11 @@ pub fn init_log(debug: bool) {
         LevelFilter::INFO
     };
 
-    let layered = Registry::default().with(layer).with(level);
+    let targets = Targets::new()
+        .with_target("h2", LevelFilter::OFF)
+        .with_default(LevelFilter::DEBUG);
+
+    let layered = Registry::default().with(targets).with(layer).with(level);
 
     subscriber::set_global_default(layered).unwrap();
 }
