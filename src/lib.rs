@@ -14,18 +14,23 @@ mod notify;
 
 #[derive(Debug, Parser)]
 struct Args {
+    /// enable debug log
     #[clap(short, long, action)]
     debug: bool,
 
+    /// set memory watch interval
     #[clap(long, value_parser = humantime::parse_duration, default_value = "3s")]
     mem_watch_interval: Duration,
 
+    /// set memory max usage ratio
     #[clap(long, default_value = "0.7")]
-    mem_max_used_ratio: f64,
+    mem_max_usage_ratio: f64,
 
+    /// telegram bot token
     #[clap(short = 'b', long)]
     bot_token: String,
 
+    /// telegram group chat id
     #[clap(long)]
     group_chat_id: i64,
 }
@@ -39,7 +44,7 @@ pub async fn run() -> anyhow::Result<()> {
     let (mem_watch, memory_info) = ProcfsMemoryWatch::new(
         bot.clone(),
         args.mem_watch_interval,
-        args.mem_max_used_ratio,
+        args.mem_max_usage_ratio,
     );
 
     let watch_task = tokio::spawn(async move { mem_watch.run().await });
@@ -55,7 +60,7 @@ pub async fn run() -> anyhow::Result<()> {
 
 pub fn init_log(debug: bool) {
     let layer = fmt::layer()
-        .pretty()
+        .with_line_number(true)
         .with_target(true)
         .with_writer(io::stderr);
 
